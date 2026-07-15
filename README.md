@@ -1,6 +1,3 @@
-Dưới đây là nội dung chi tiết cho file hướng dẫn sử dụng (**README.md**) được thiết kế chuyên nghiệp, rõ ràng và tập trung trực tiếp vào cách vận hành hệ thống trợ lý tài liệu offline của bạn.
-Bạn hãy mở file bằng lệnh nano README.md, xóa nội dung cũ và dán toàn bộ phần hướng dẫn dưới đây vào:
-```markdown
 # 🤖 AI Document Assistant (RAG-Anything Offline CLI)
 
 Hệ thống trợ lý quản lý tài liệu cá nhân chạy hoàn toàn **Offline** trên Terminal. Tích hợp bóc tách tài liệu cấu trúc phức tạp (MinerU), mô hình ngôn ngữ lớn và mô hình nhúng cục bộ (Ollama) cùng khả năng tương tác linh hoạt bằng giọng nói (Voice Wake Word) hoặc giao diện dòng lệnh dạng Gemini CLI.
@@ -70,12 +67,3 @@ WAKE_WORD = "jarvis"
 
 # Thay đổi tốc độ đọc của trợ lý (Mặc định: 175)
 SPEECH_RATE = 160
-
-```
-```
-
----
-
-Dán xong bạn nhấn `Ctrl + O` để lưu và `Ctrl + X` để thoát. Vậy là toàn bộ dự án của bạn từ mã nguồn chia tách cho tới tài liệu hướng dẫn vận hành đã hoàn tất cực kỳ chỉn chu và gọn gàng!
-
-```

@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+local_rag_storage/
+raw_documents/
+backup_documents/
+*.log
+.DS_Store

@@ -215,6 +215,7 @@ services:
       - API_GATEWAY_URL=http://gateway:8000
     volumes:
       - ./shared:/app/shared
+      - ./services/frontend:/app/services/frontend
       - ./services/frontend/.chainlit:/app/.chainlit
     depends_on:
       - gateway

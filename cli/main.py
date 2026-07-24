@@ -200,7 +200,7 @@ Chào mừng đến với **RAG-ALL** - Trợ lý AI nghiên cứu học thuật
         try:
             async with httpx.AsyncClient(timeout=600) as client:
                 response = await client.post(
-                    f"{GATEWAY_URL}/research/start",
+                    f"{GATEWAY_URL}/research/",
                     json={
                         "topic": topic,
                         "depth_level": int(depth),
@@ -227,14 +227,19 @@ Chào mừng đến với **RAG-ALL** - Trợ lý AI nghiên cứu học thuật
 
                 if response.status_code == 200:
                     data = response.json()
+                    services = data.get("services", data)
 
-                    table = Table(title="Trạng thái Hệ thống")
+                    table = Table(title="Trang thai He thong")
                     table.add_column("Service", style="cyan")
                     table.add_column("Status", style="green")
 
-                    for service, status in data.items():
-                        status_text = "🟢 Healthy" if status == "healthy" else "🔴 Unhealthy"
-                        table.add_row(service, status_text)
+                    for name, info in services.items():
+                        if isinstance(info, dict):
+                            status = info.get("status", "unknown")
+                        else:
+                            status = str(info)
+                        status_text = "OK" if status == "healthy" else f"FAIL ({status})"
+                        table.add_row(name, status_text)
 
                     console.print(table)
                 else:

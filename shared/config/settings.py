@@ -1,6 +1,6 @@
 """
-RAG-ALL: Centralized Settings
-Đọc cấu hình từ environment variables và .env file.
+RAG-Agent: Centralized Settings
+Doc cau hinh tu environment variables va .env file.
 """
 
 from pathlib import Path
@@ -9,13 +9,10 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    """
-    Central settings for all RAG-ALL services.
-    Reads from environment variables and .env file.
-    """
+    """Central settings — reads from env vars and .env file."""
 
     # --- Project ---
-    project_name: str = "RAG-ALL"
+    project_name: str = "RAG-Agent"
     version: str = "0.1.0"
     debug: bool = False
 
@@ -23,10 +20,12 @@ class Settings(BaseSettings):
     base_dir: Path = Path(__file__).resolve().parent.parent.parent
     data_dir: Path = Field(default_factory=lambda: Path(__file__).resolve().parent.parent.parent / "data")
 
-    # --- LLM Providers ---
+    # --- Ollama ---
     ollama_base_url: str = Field(default="http://ollama:11434", alias="OLLAMA_BASE_URL")
-    ollama_model: str = Field(default="llama3.1:8b", alias="OLLAMA_MODEL")
-    ollama_model_large: str = Field(default="qwen2.5:14b", alias="OLLAMA_MODEL_LARGE")
+    ollama_model: str = Field(default="qwen3.5:4b", alias="OLLAMA_MODEL")
+    ollama_model_large: str = Field(default="qwen3.5:4b", alias="OLLAMA_MODEL_LARGE")
+
+    # --- Gemini ---
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_model: str = "gemini-2.0-flash"
 
@@ -38,38 +37,27 @@ class Settings(BaseSettings):
     chroma_port: int = 8000
     chroma_collection: str = "ragall_documents"
 
-    # --- Document Processing ---
-    mineru_enabled: bool = True
-    markitdown_enabled: bool = True
-    magika_enabled: bool = True
-
-    # --- Search ---
-    tavily_api_key: str = ""
-    brave_api_key: str = ""
-    semantic_scholar_api_key: str = ""
+    # --- Search (optional) ---
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
+    brave_api_key: str = Field(default="", alias="BRAVE_API_KEY")
+    semantic_scholar_api_key: str = Field(default="", alias="SEMANTIC_SCHOLAR_API_KEY")
     duckduckgo_enabled: bool = True
 
     # --- Web Crawling ---
     crawl4ai_url: str = "http://crawl4ai:3000"
 
-    # --- Accuracy / Verification ---
-    citation_verify_enabled: bool = True
-    fact_crossref_enabled: bool = True
-    hallucination_detection_enabled: bool = True
-    confidence_threshold_high: float = 0.85
-    confidence_threshold_medium: float = 0.60
-    confidence_threshold_low: float = 0.40
-
     # --- Voice ---
     tts_engine: str = "piper"
     stt_engine: str = "whisper"
-    whisper_model: str = "base"
+    whisper_model: str = Field(default="base", alias="WHISPER_MODEL")
     piper_model_dir: str = "/app/data/models/piper"
     piper_voice_vi: str = "vi-VN-hoaimy-medium"
     piper_voice_en: str = "en-US-lessac-medium"
 
-    # --- API ---
-    gateway_port: int = 8000
+    # --- Chainlit ---
+    chainlit_auth_secret: str = Field(default="change-me-in-production", alias="CHAINLIT_AUTH_SECRET")
+
+    # --- Service URLs ---
     agent_service_url: str = "http://agent:8001"
     rag_service_url: str = "http://rag:8002"
     document_service_url: str = "http://document:8003"
@@ -77,14 +65,17 @@ class Settings(BaseSettings):
     research_service_url: str = "http://research:8007"
     editor_service_url: str = "http://editor:8009"
     accuracy_service_url: str = "http://accuracy:8008"
+    frontend_service_url: str = "http://frontend:8005"
+    gateway_port: int = 8000
 
-    # --- Research / Deep Browsing ---
-    default_depth_level: int = 2  # Moderate
+    # --- Accuracy ---
+    confidence_threshold_high: float = 0.85
+    confidence_threshold_medium: float = 0.60
+    confidence_threshold_low: float = 0.40
+
+    # --- Research ---
+    default_depth_level: int = 2
     max_crawl_pages: int = 200
-    crawl_confidence_threshold: float = 0.85
-
-    # --- Chainlit ---
-    chainlit_auth_secret: str = "change-me-in-production"
 
     model_config = {
         "env_file": ".env",
@@ -97,5 +88,5 @@ class Settings(BaseSettings):
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
 
-# Singleton instance - import this everywhere
+# Singleton — import Settings from here
 settings = Settings()

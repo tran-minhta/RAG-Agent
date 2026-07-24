@@ -34,6 +34,7 @@ services:
       - VOICE_SERVICE_URL=http://voice:8004
     volumes:
       - ./shared:/app/shared
+      - ./services/gateway:/app/services/gateway
       - ./data:/app/data
     depends_on:
       - agent
@@ -63,6 +64,7 @@ services:
       - EDITOR_SERVICE_URL=http://editor:8009
     volumes:
       - ./shared:/app/shared
+      - ./services/agent:/app/services/agent
       - ./data:/app/data
     depends_on:
       - rag

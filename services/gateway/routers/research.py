@@ -52,7 +52,11 @@ async def start_research(request: DeepResearchRequest) -> DeepResearchResult:
             )
 
             if response.status_code == 200:
-                return DeepResearchResult(**response.json())
+                data = response.json()
+                # Research service returns session_id, map to research_id
+                if "session_id" in data and "research_id" not in data:
+                    data["research_id"] = data.pop("session_id")
+                return DeepResearchResult(**data)
             else:
                 raise HTTPException(
                     status_code=response.status_code,

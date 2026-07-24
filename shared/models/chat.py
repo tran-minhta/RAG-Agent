@@ -98,7 +98,7 @@ class AgentState(BaseModel):
 # =============================================================================
 
 class ChatRequest(BaseModel):
-    """Request từ user để chat"""
+    """Request tu user de chat"""
     message: str = Field(description="User message")
     conversation_id: Optional[str] = Field(default=None, description="Existing conversation ID")
     user_id: str = Field(default="default")
@@ -106,13 +106,16 @@ class ChatRequest(BaseModel):
     depth_level: int = Field(default=2, ge=1, le=5, description="Research depth 1-5")
     use_web_search: bool = Field(default=True, description="Allow web search")
     use_deep_research: bool = Field(default=False, description="Enable deep research mode")
+    # Provider/model override
+    provider: Optional[str] = Field(default=None, description="LLM provider: ollama | gemini")
+    model: Optional[str] = Field(default=None, description="Model name override")
     # Voice
     voice_input: bool = Field(default=False, description="Input is voice (auto STT)")
     voice_output: bool = Field(default=False, description="Output as voice (auto TTS)")
 
 
 class ChatResponse(BaseModel):
-    """Response từ agent"""
+    """Response tu agent"""
     message: str = Field(description="Agent response")
     conversation_id: str
     # Confidence & accuracy
@@ -128,6 +131,8 @@ class ChatResponse(BaseModel):
     # Metadata
     tools_used: list[str] = Field(default_factory=list)
     processing_time_ms: float = 0
+    provider: str = Field(default="", description="LLM provider used")
+    model: str = Field(default="", description="Model used")
     # Voice
     audio_url: Optional[str] = Field(default=None, description="TTS audio file URL")
 

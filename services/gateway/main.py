@@ -76,7 +76,7 @@ app.mount("/static", StaticFiles(directory="data"), name="static")
 # Include Routers
 # =============================================================================
 
-# Health check
+# Health check + Models
 app.include_router(health.router, prefix="/health", tags=["Health"])
 
 # Chat (WebSocket + REST)

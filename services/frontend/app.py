@@ -1,6 +1,6 @@
 """
 RAG-Agent: Chainlit Frontend (v2)
-Web UI cho RAG-Agent system sử dụng Chainlit 2.x.
+Web UI cho RAG-Agent — Chainlit 2.x compatible.
 """
 
 import chainlit as cl
@@ -17,10 +17,10 @@ GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:8000")
 @cl.set_starters
 async def set_starters():
     return [
-        cl.Starter(label="Chat", message="Xin chào, tôi cần giúp đỡ"),
-        cl.Starter(label="Upload tài liệu", message="upload tài liệu"),
+        cl.Starter(label="Chat", message="Xin chao, toi can giup do"),
+        cl.Starter(label="Upload tai lieu", message="upload tai lieu"),
         cl.Starter(label="Deep Research", message="research Machine Learning"),
-        cl.Starter(label="Kiểm tra hệ thống", message="kiểm tra hệ thống"),
+        cl.Starter(label="Kiem tra he thong", message="kiem tra he thong"),
     ]
 
 
@@ -32,25 +32,67 @@ async def set_starters():
 async def on_chat_start():
     cl.user_session.set("conversation_id", cl.context.session.id)
     cl.user_session.set("history", [])
-    cl.user_session.set("model", "qwen3.5:4b")
+    cl.user_session.set("model", None)  # None = use server default
     cl.user_session.set("provider", "ollama")
     cl.user_session.set("use_web_search", True)
 
-    await cl.Message(
-        content=(
-            "**Chao mung den RAG-Agent!**\n\n"
-            "Go **/help** de xem danh sach lenh.\n"
-            "Go **/settings** de cai dat model.\n\n"
-            "**Cau hinh hien tai:**\n"
-            "- Provider: Ollama\n"
-            "- Model: qwen3.5:4b\n"
-            "- Web Search: Bat"
-        )
-    ).send()
+    # Kiem tra ket noi + lay danh sach models
+    status_text = await _build_welcome()
+    await cl.Message(content=status_text).send()
+
+
+async def _build_welcome() -> str:
+    """Xay dung tin chao mung voi trang thai he thong."""
+    lines = ["**Chao mung den RAG-Agent!**\n"]
+
+    # Kiem tra health
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GATEWAY_URL}/health/")
+            if r.status_code == 200:
+                data = r.json()
+                services = data.get("services", {})
+                ok_count = sum(1 for s in services.values() if s.get("status") == "healthy")
+                total = len(services)
+                lines.append(f"**He thong:** {ok_count}/{total} services OK\n")
+
+                # Chi hien thi services that bai
+                failed = [name for name, s in services.items() if s.get("status") != "healthy"]
+                if failed:
+                    lines.append(f"  Loi: {', '.join(failed)}\n")
+    except Exception:
+        lines.append("**He thong:** Gateway khong kha dung\n")
+
+    # Lay danh sach models
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GATEWAY_URL}/models")
+            if r.status_code == 200:
+                data = r.json()
+                ollama_models = data.get("ollama", [])
+                if ollama_models:
+                    lines.append("**Ollama models:**")
+                    for m in ollama_models:
+                        lines.append(f"  - {m['name']} ({m.get('size', '')})")
+                    lines.append("")
+
+                    # Hien thi model dang dung
+                    current = cl.user_session.get("model")
+                    if current:
+                        lines.append(f"**Model hien tai:** `{current}`")
+                    else:
+                        lines.append(f"**Model hien tai:** `{ollama_models[0]['name']}` (server default)")
+                else:
+                    lines.append("**Ollama:** Khong co model nao\n")
+    except Exception:
+        pass
+
+    lines.append("\nGo **/help** de xem danh sach lenh.")
+    return "\n".join(lines)
 
 
 # =============================================================================
-# Message Handler
+# Commands
 # =============================================================================
 
 @cl.on_message
@@ -59,28 +101,19 @@ async def on_message(message: cl.Message):
     cmd = content.lower()
 
     # --- help ---
-    if cmd in ("/help", "help", "trợ giúp"):
+    if cmd in ("/help", "help"):
         await cl.Message(content=_help_text()).send()
         return
 
     # --- settings / setting ---
-    if cmd in ("/settings", "/setting", "settings", "setting", "cài đặt"):
-        await cl.Message(content=_settings_text()).send()
+    if cmd in ("/settings", "/setting", "settings", "setting"):
+        await cl.Message(content=await _settings_text()).send()
         return
 
     # --- model ---
     if cmd.startswith("/model ") or cmd.startswith("model "):
-        arg = content.split(None, 1)[1].strip().lower() if len(content.split(None, 1)) > 1 else ""
-        if arg == "ollama":
-            cl.user_session.set("provider", "ollama")
-            cl.user_session.set("model", "qwen3.5:4b")
-            await cl.Message(content="Da chuyen sang **Ollama** (qwen3.5:4b)").send()
-        elif arg == "gemini":
-            cl.user_session.set("provider", "gemini")
-            cl.user_session.set("model", "gemini-2.0-flash")
-            await cl.Message(content="Da chuyen sang **Gemini** (gemini-2.0-flash)").send()
-        else:
-            await cl.Message(content="Dung: **/model ollama** hoac **/model gemini**").send()
+        arg = content.split(None, 1)[1].strip() if len(content.split(None, 1)) > 1 else ""
+        await _switch_model(arg)
         return
 
     # --- search ---
@@ -88,27 +121,28 @@ async def on_message(message: cl.Message):
         arg = content.split(None, 1)[1].strip().lower() if len(content.split(None, 1)) > 1 else ""
         if arg == "on":
             cl.user_session.set("use_web_search", True)
-            await cl.Message(content="Da **bat** web search").send()
+            await cl.Message(content="Da **bat** web search.").send()
         elif arg == "off":
             cl.user_session.set("use_web_search", False)
-            await cl.Message(content="Da **tat** web search").send()
+            await cl.Message(content="Da **tat** web search.").send()
         else:
             await cl.Message(content="Dung: **/search on** hoac **/search off**").send()
         return
 
     # --- clear ---
-    if cmd in ("/clear", "clear", "xóa"):
+    if cmd in ("/clear", "clear"):
         cl.user_session.set("history", [])
         await cl.Message(content="Da xoa lich su chat.").send()
         return
 
     # --- status ---
-    if cmd in ("/status", "status", "kiểm tra hệ thống", "kiểm tra trạng thái"):
-        await _check_status()
+    if cmd in ("/status", "status", "kiem tra he thong"):
+        welcome = await _build_welcome()
+        await cl.Message(content=welcome).send()
         return
 
     # --- upload ---
-    if cmd in ("/upload", "upload", "upload tài liệu", "tải tài liệu"):
+    if cmd in ("/upload", "upload", "upload tai lieu"):
         await cl.Message(
             content=(
                 "**Upload tai lieu:**\n\n"
@@ -129,45 +163,105 @@ async def on_message(message: cl.Message):
                 content=(
                     "**Deep Research:**\n\n"
                     "Nhap chu de nghien cuu, vi du:\n"
-                    "**/research Machine Learning in Healthcare**\n\n"
-                    "Hoac chat truc tiep de agent tu research."
+                    "**/research Machine Learning in Healthcare**"
                 )
             ).send()
         return
 
-    # --- mac dinh: chat voi agent ---
+    # --- mac dinh: chat ---
     await chat_with_agent(content)
 
 
 def _help_text():
     return (
         "**Danh sach lenh:**\n\n"
-        "- **/help** - Tro giup\n"
-        "- **/settings** - Cai dat\n"
-        "- **/model ollama** - Dung Ollama\n"
-        "- **/model gemini** - Dung Gemini\n"
-        "- **/search on** - Bat web search\n"
-        "- **/search off** - Tat web search\n"
-        "- **/clear** - Xoa lich su\n"
-        "- **/status** - Trang thai he thong\n"
-        "- **/upload** - Upload tai lieu\n"
-        "- **/research <chu de>** - Deep Research"
+        "- **/help** — Tro giup\n"
+        "- **/settings** — Cai dat hien tai\n"
+        "- **/model <ten>** — Chuyen model (xem danh sach o /settings)\n"
+        "- **/search on/off** — Bat/tat web search\n"
+        "- **/clear** — Xoa lich su\n"
+        "- **/status** — Kiem tra he thong + models\n"
+        "- **/upload** — Upload tai lieu\n"
+        "- **/research <chu de>** — Deep Research"
     )
 
 
-def _settings_text():
+async def _settings_text():
     provider = cl.user_session.get("provider", "ollama")
-    model = cl.user_session.get("model", "qwen3.5:4b")
+    model = cl.user_session.get("model") or "(server default)"
     ws = cl.user_session.get("use_web_search", True)
+
+    # Lay danh sach models
+    models_info = ""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GATEWAY_URL}/models")
+            if r.status_code == 200:
+                data = r.json()
+                ollama_models = data.get("ollama", [])
+                if ollama_models:
+                    models_info = "**Ollama models:**\n"
+                    for m in ollama_models:
+                        models_info += f"  - `{m['name']}` ({m.get('size', '')})\n"
+                gemini_models = data.get("gemini", [])
+                if gemini_models:
+                    models_info += "\n**Gemini models:**\n"
+                    for m in gemini_models:
+                        models_info += f"  - `{m['name']}` — {m.get('description', '')}\n"
+    except Exception:
+        models_info = "(Khong the lay danh sach models)"
+
     return (
-        "**Cai dat hien tai:**\n\n"
+        f"**Cai dat hien tai:**\n\n"
         f"- Provider: `{provider}`\n"
         f"- Model: `{model}`\n"
         f"- Web Search: `{'Bat' if ws else 'Tat'}`\n\n"
-        "**Thay doi:**\n"
-        "- **/model ollama** hoac **/model gemini**\n"
-        "- **/search on** hoac **/search off**"
+        f"{models_info}\n\n"
+        f"**Thay doi:**\n"
+        f"- **/model <ten>** — Chuyen model\n"
+        f"- **/search on/off** — Bat/tat web search"
     )
+
+
+async def _switch_model(name: str):
+    if not name:
+        await cl.Message(content="Dung: **/model <ten-model>**").send()
+        return
+
+    # Kiem tra model co ton tai trong Ollama khong
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{GATEWAY_URL}/models")
+            if r.status_code == 200:
+                data = r.json()
+                ollama_models = [m["name"] for m in data.get("ollama", [])]
+
+                # Tim model phu hop (fuzzy match)
+                matched = None
+                for m in ollama_models:
+                    if name.lower() in m.lower():
+                        matched = m
+                        break
+
+                if matched:
+                    cl.user_session.set("model", matched)
+                    cl.user_session.set("provider", "ollama")
+                    await cl.Message(content=f"Da chuyen sang **{matched}**").send()
+                elif name.lower() in ("gemini", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"):
+                    cl.user_session.set("model", name)
+                    cl.user_session.set("provider", "gemini")
+                    await cl.Message(content=f"Da chuyen sang **{name}** (Gemini)").send()
+                else:
+                    await cl.Message(
+                        content=(
+                            f"Khong tim thay model `{name}`.\n\n"
+                            f"Models co san: {', '.join(ollama_models)}"
+                        )
+                    ).send()
+    except Exception:
+        # Khong kiem tra duoc, cho phep doi
+        cl.user_session.set("model", name)
+        await cl.Message(content=f"Da chuyen sang **{name}**").send()
 
 
 # =============================================================================
@@ -178,6 +272,8 @@ async def chat_with_agent(content: str):
     conversation_id = cl.user_session.get("conversation_id")
     history = cl.user_session.get("history", [])
     use_web_search = cl.user_session.get("use_web_search", True)
+    provider = cl.user_session.get("provider", "ollama")
+    model = cl.user_session.get("model")
 
     thinking = cl.Message(content="Dang suy nghi...")
     await thinking.send()
@@ -191,6 +287,8 @@ async def chat_with_agent(content: str):
                     "conversation_id": conversation_id,
                     "history": history[-10:],
                     "use_web_search": use_web_search,
+                    "provider": provider,
+                    "model": model,
                 },
             )
 
@@ -199,13 +297,18 @@ async def chat_with_agent(content: str):
 
                 history.append({"role": "user", "content": content})
                 history.append({"role": "assistant", "content": data.get("message", "")})
-                cl.user_session.set("history", history)
+                cl.user_session.set("history", history[-20:])
 
                 reply = data.get("message", "Khong co phan hoi.")
 
+                # Hien thi model da dung
+                used_model = data.get("model", "")
+                if used_model:
+                    reply += f"\n\n---\n*Model: {used_model}*"
+
                 confidence = data.get("confidence_score", 1.0)
                 if confidence < 0.85:
-                    reply += f"\n\n---\n**Do tin cay:** {confidence:.0%}"
+                    reply += f"\n**Do tin cay:** {confidence:.0%}"
 
                 sources = data.get("sources", [])
                 if sources:
@@ -214,10 +317,9 @@ async def chat_with_agent(content: str):
                         if src.get("type") == "web":
                             reply += f"\n{i}. [{src.get('title', 'Link')}]({src.get('url', '#')})"
                         elif src.get("type") == "knowledge_base":
-                            reply += f"\n{i}. Knowledge Base (score: {src.get('score', 0):.2f})"
+                            reply += f"\n{i}. KB (score: {src.get('score', 0):.2f})"
 
                 await thinking.update(content=reply)
-
             else:
                 await thinking.update(content="Co loi xay ra. Vui long thu lai.")
 
@@ -225,27 +327,6 @@ async def chat_with_agent(content: str):
         await thinking.update(content="Het thoi gian xu ly. Vui long thu cau hoi don gian hon.")
     except Exception as e:
         await thinking.update(content=f"Loi: {str(e)}")
-
-
-# =============================================================================
-# Status
-# =============================================================================
-
-async def _check_status():
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{GATEWAY_URL}/health/")
-            if response.status_code == 200:
-                data = response.json()
-                lines = []
-                for svc, status in data.items():
-                    icon = "OK" if status == "healthy" else "FAIL"
-                    lines.append(f"- {svc}: {icon}")
-                await cl.Message(content="**Trang thai he thong:**\n\n" + "\n".join(lines)).send()
-            else:
-                await cl.Message(content="Khong the kiem tra trang thai.").send()
-    except Exception:
-        await cl.Message(content="Gateway khong kha dung.").send()
 
 
 # =============================================================================
@@ -273,7 +354,7 @@ async def _do_research(topic: str):
                         f"**Nghien cuu hoan thanh!**\n\n"
                         f"- Pages crawled: {data.get('pages_crawled', 0)}\n"
                         f"- Session: {data.get('session_id', 'N/A')}\n\n"
-                        f"Ket qua da duoc luu. Ban co the hoi ve chu de nay."
+                        f"Ket qua da duoc luu."
                     )
                 ).send()
             else:

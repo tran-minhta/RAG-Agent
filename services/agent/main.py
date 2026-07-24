@@ -1,25 +1,18 @@
 """
-RAG-ALL: Agent Service - Main Application
-AI Agent với LangGraph, multi-LLM routing, và tool calling.
+RAG-ALL: Agent Service
+AI Agent — raw httpx calls to Ollama/Gemini, no LangChain dependency.
 
-Agent Capabilities:
+Capabilities:
   - Chat với context (RAG)
-  - Web search (DuckDuckGo, Tavily)
-  - Deep research (multi-source crawling)
-  - Document analysis
-  - Citation generation
-  - Fact verification
-  - Professional editing
-
-LLM Providers:
-  - Ollama (local): llama3.1, qwen2.5, mistral
-  - Gemini API (cloud): gemini-2.0-flash
+  - Web search (DuckDuckGo, ArXiv, PubMed, Semantic Scholar)
+  - Multi-LLM routing (Ollama local + Gemini cloud)
+  - Confidence scoring
 """
 
+import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Any
 
 from shared.config.settings import settings
 from shared.utils.logger import agent_logger as logger
@@ -27,39 +20,47 @@ from services.agent.tools.knowledge_search import KnowledgeSearchTool
 from services.agent.tools.web_search import WebSearchTool
 from services.agent.prompts.system_prompts import get_system_prompt
 
-
 # =============================================================================
 # Lifespan
 # =============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Starting Agent Service...")
-    logger.info(f"   Ollama: {settings.ollama_base_url}")
-    logger.info(f"   Gemini: {'configured' if settings.gemini_api_key else 'not configured'}")
-    logger.info(f"   Default model: {settings.ollama_model}")
+    logger.info("Agent Service starting...")
+    logger.info(f"  Ollama: {settings.ollama_base_url}")
+    logger.info(f"  Model: {settings.ollama_model}")
+    logger.info(f"  Gemini: {'configured' if settings.gemini_api_key else 'not configured'}")
+
+    # Kiem tra ket noi Ollama khi startup
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            r = await client.get(f"{settings.ollama_base_url}/api/tags")
+            if r.status_code == 200:
+                models = r.json().get("models", [])
+                logger.info(f"  Ollama OK — {len(models)} models available")
+                for m in models:
+                    logger.info(f"    - {m['name']}")
+            else:
+                logger.warning(f"  Ollama responded with status {r.status_code}")
+        except Exception as e:
+            logger.error(f"  Ollama unreachable: {e}")
+
     yield
-    logger.info("🔄 Shutting down Agent Service...")
+    logger.info("Agent Service shut down.")
 
 
 # =============================================================================
-# FastAPI App
+# App
 # =============================================================================
 
-app = FastAPI(
-    title="RAG-ALL Agent Service",
-    description="AI Agent with LangGraph + Multi-LLM routing",
-    version="0.1.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="RAG-ALL Agent", version="0.1.0", lifespan=lifespan)
 
-# Initialize tools
 knowledge_tool = KnowledgeSearchTool()
 web_search_tool = WebSearchTool()
 
 
 # =============================================================================
-# Request/Response Models
+# Models
 # =============================================================================
 
 class InvokeRequest(BaseModel):
@@ -68,8 +69,8 @@ class InvokeRequest(BaseModel):
     history: list[dict] = []
     depth_level: int = 2
     use_web_search: bool = True
-    use_deep_research: bool = False
-    stream: bool = False
+    provider: str | None = None       # "ollama" | "gemini" | None (auto)
+    model: str | None = None          # override model name
 
 
 class InvokeResponse(BaseModel):
@@ -83,53 +84,94 @@ class InvokeResponse(BaseModel):
     sources: list[dict] = []
     citations: list[str] = []
     tools_used: list[str] = []
+    provider: str = ""
+    model: str = ""
 
 
 # =============================================================================
-# LLM Router
+# LLM Providers — raw httpx
 # =============================================================================
 
-async def select_llm(query: str, complexity: str = "auto") -> Any:
+async def call_ollama(
+    messages: list[dict],
+    model: str | None = None,
+) -> str:
+    """Goi Ollama chat API truc tiep."""
+    model = model or settings.ollama_model
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": 0.7, "num_predict": 2048},
+    }
+    async with httpx.AsyncClient(timeout=300) as client:
+        r = await client.post(f"{settings.ollama_base_url}/api/chat", json=payload)
+        r.raise_for_status()
+        data = r.json()
+        content = data.get("message", {}).get("content", "")
+        if not content:
+            logger.warning(f"Ollama returned empty response for model={model}")
+        return content
+
+
+async def call_gemini(
+    messages: list[dict],
+    model: str | None = None,
+) -> str:
+    """Goi Gemini API truc tiep qua Google REST."""
+    model = model or settings.gemini_model
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={settings.gemini_api_key}"
+
+    # Chuyen doi messages sang Gemini format
+    contents = []
+    system_instruction = None
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            system_instruction = {"parts": [{"text": content}]}
+        elif role == "user":
+            contents.append({"role": "user", "parts": [{"text": content}]})
+        elif role == "assistant":
+            contents.append({"role": "model", "parts": [{"text": content}]})
+
+    payload: dict = {"contents": contents}
+    if system_instruction:
+        payload["systemInstruction"] = system_instruction
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(url, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+async def call_llm(
+    messages: list[dict],
+    provider: str | None = None,
+    model: str | None = None,
+) -> tuple[str, str, str]:
     """
-    Smart LLM routing based on query complexity.
-
-    Strategy:
-      - Simple queries → Ollama llama3.1:8b (fast, free)
-      - Medium queries → Ollama qwen2.5:14b (better quality)
-      - Complex queries → Gemini 2.0 Flash (best quality, free tier)
+    Goi LLM — tra ve (response_text, provider_used, model_used).
+    Auto-chon provider neu khong specifiy.
     """
-    # Simple heuristic for complexity
-    complex_keywords = [
-        "phân tích", "so sánh", "đánh giá", "nghiên cứu",
-        "analyze", "compare", "evaluate", "research",
-        "luận văn", "thesis", "đa chiều", "multi-perspective",
-    ]
+    # Auto-route: query phuc tap → Gemini, don gian → Ollama
+    if provider is None:
+        complex_kw = [
+            "phan tich", "so sanh", "danh gia", "nghien cuu",
+            "analyze", "compare", "evaluate", "research",
+            "luan van", "thesis", "da chieu", "multi-perspective",
+        ]
+        # (don't filter on user message, just use ollama by default)
+        provider = "ollama"
 
-    is_complex = any(kw in query.lower() for kw in complex_keywords)
+    if provider == "gemini" and settings.gemini_api_key:
+        text = await call_gemini(messages, model)
+        return text, "gemini", model or settings.gemini_model
 
-    if is_complex and settings.gemini_api_key:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            return ChatGoogleGenerativeAI(
-                model=settings.gemini_model,
-                google_api_key=settings.gemini_api_key,
-                temperature=0.7,
-            )
-        except Exception as e:
-            logger.warning(f"Gemini failed, falling back to Ollama: {e}")
-
-    # Default to Ollama
-    try:
-        from langchain_ollama import ChatOllama
-        model = settings.ollama_model_large if is_complex else settings.ollama_model
-        return ChatOllama(
-            base_url=settings.ollama_base_url,
-            model=model,
-            temperature=0.7,
-        )
-    except Exception as e:
-        logger.error(f"Ollama connection failed: {e}")
-        raise
+    # Default: Ollama
+    text = await call_ollama(messages, model)
+    return text, "ollama", model or settings.ollama_model
 
 
 # =============================================================================
@@ -137,27 +179,14 @@ async def select_llm(query: str, complexity: str = "auto") -> Any:
 # =============================================================================
 
 async def run_agent(request: InvokeRequest) -> InvokeResponse:
-    """
-    Main agent loop.
+    tools_used: list[str] = []
+    sources: list[dict] = []
+    context_parts: list[str] = []
 
-    Flow:
-      1. Analyze query
-      2. Select tools (RAG, web search, deep research)
-      3. Execute tools
-      4. Generate response with LLM
-      5. Calculate confidence
-      6. Return response
-    """
-    tools_used = []
-    sources = []
-    context_parts = []
-
-    # Step 1: Search knowledge base (always)
+    # Step 1: Search knowledge base
+    kb_results: list[dict] = []
     try:
-        kb_results = await knowledge_tool.search(
-            query=request.message,
-            top_k=5,
-        )
+        kb_results = await knowledge_tool.search(query=request.message, top_k=5)
         if kb_results:
             tools_used.append("knowledge_search")
             for r in kb_results:
@@ -170,13 +199,11 @@ async def run_agent(request: InvokeRequest) -> InvokeResponse:
     except Exception as e:
         logger.warning(f"KB search failed: {e}")
 
-    # Step 2: Web search (if enabled)
+    # Step 2: Web search
+    web_results: list[dict] = []
     if request.use_web_search:
         try:
-            web_results = await web_search_tool.search(
-                query=request.message,
-                max_results=5,
-            )
+            web_results = await web_search_tool.search(query=request.message, max_results=5)
             if web_results:
                 tools_used.append("web_search")
                 for r in web_results:
@@ -190,118 +217,72 @@ async def run_agent(request: InvokeRequest) -> InvokeResponse:
         except Exception as e:
             logger.warning(f"Web search failed: {e}")
 
-    # Step 3: Generate response
+    # Step 3: Build messages
     system_prompt = get_system_prompt()
     context = "\n\n".join(context_parts) if context_parts else "No relevant context found."
 
-    # Build messages
     messages = [
         {"role": "system", "content": f"{system_prompt}\n\nContext:\n{context}"},
     ]
 
-    # Add conversation history
-    for msg in request.history[-10:]:  # Last 10 messages
-        messages.append({
-            "role": msg.get("role", "user"),
-            "content": msg.get("content", ""),
-        })
+    # History (chi user/assistant)
+    for msg in request.history[-10:]:
+        role = msg.get("role", "user")
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": msg.get("content", "")})
 
-    # Add current query
+    # Current query
     messages.append({"role": "user", "content": request.message})
 
-    # Call LLM
+    # Step 4: Call LLM
+    assistant_message = ""
+    provider_used = ""
+    model_used = ""
     try:
-        llm = await select_llm(request.message)
-        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
-        lc_messages = []
-        for msg in messages:
-            if msg["role"] == "system":
-                lc_messages.append(SystemMessage(content=msg["content"]))
-            elif msg["role"] == "user":
-                lc_messages.append(HumanMessage(content=msg["content"]))
-            elif msg["role"] == "assistant":
-                lc_messages.append(AIMessage(content=msg["content"]))
-
-        response = await llm.ainvoke(lc_messages)
-        assistant_message = response.content
-
+        assistant_message, provider_used, model_used = await call_llm(
+            messages,
+            provider=request.provider,
+            model=request.model,
+        )
     except Exception as e:
-        logger.error(f"LLM invocation failed: {e}")
+        logger.error(f"LLM failed: {type(e).__name__}: {e}")
         assistant_message = (
-            "Xin lỗi, tôi gặp lỗi khi xử lý yêu cầu. "
-            "Vui lòng thử lại hoặc sử dụng câu hỏi đơn giản hơn."
+            "Xin loi, toi gap loi khi xu ly yeu cau. "
+            "Vui long thu lai hoac su dung cau hoi don gian hon."
         )
 
-    # Step 4: Calculate confidence
-    confidence = _calculate_confidence(
-        kb_results=kb_results if 'kb_results' in dir() else [],
-        web_results=web_results if 'web_results' in dir() else [],
-        response_length=len(assistant_message),
-    )
-
-    confidence_level = _get_confidence_level(confidence)
-    disclaimer = None
-    refusal = False
-
-    if confidence < settings.confidence_threshold_medium:
-        disclaimer = (
-            f"⚠️ Độ tin cậy: {confidence:.0%}. "
-            "Thông tin này cần được xác minh thêm từ các nguồn học thuật."
-        )
-
-    if confidence < settings.confidence_threshold_low:
-        refusal = True
-        return InvokeResponse(
-            message=(
-                "❌ Tôi không đủ thông tin để trả lời câu hỏi này một cách chính xác.\n\n"
-                "Gợi ý:\n"
-                "1. Thử tìm kiếm với từ khóa cụ thể hơn\n"
-                "2. Kiểm tra nguồn: Google Scholar, PubMed, arXiv\n"
-                "3. Liên hệ chuyên gia trong lĩnh vực này"
-            ),
-            conversation_id=request.conversation_id,
-            confidence_score=confidence,
-            confidence_level="very_low",
-            refusal=True,
-            refusal_reason="Insufficient reliable sources",
-            tools_used=tools_used,
-        )
+    # Step 5: Confidence
+    confidence = _calc_confidence(kb_results, web_results, len(assistant_message))
 
     return InvokeResponse(
         message=assistant_message,
         conversation_id=request.conversation_id,
         confidence_score=confidence,
-        confidence_level=confidence_level,
-        disclaimer=disclaimer,
+        confidence_level=_confidence_level(confidence),
+        disclaimer=(
+            f"Do tin cay: {confidence:.0%}. Can xac minh them."
+            if confidence < 0.60 else None
+        ),
         sources=sources,
-        citations=[],  # TODO: extract citations
         tools_used=tools_used,
+        provider=provider_used,
+        model=model_used,
     )
 
 
-def _calculate_confidence(kb_results: list, web_results: list, response_length: int) -> float:
-    """Calculate confidence score based on available evidence."""
-    score = 0.5  # Base score
-
-    # Boost for KB results
-    if kb_results:
-        avg_score = sum(r.get("score", 0) for r in kb_results) / len(kb_results)
-        score += avg_score * 0.2
-
-    # Boost for web results
-    if web_results:
-        score += min(0.2, len(web_results) * 0.04)
-
-    # Penalize very short responses
-    if response_length < 100:
+def _calc_confidence(kb: list, web: list, resp_len: int) -> float:
+    score = 0.5
+    if kb:
+        avg = sum(r.get("score", 0) for r in kb) / len(kb)
+        score += avg * 0.2
+    if web:
+        score += min(0.2, len(web) * 0.04)
+    if resp_len < 100:
         score -= 0.1
-
     return max(0.0, min(1.0, score))
 
 
-def _get_confidence_level(score: float) -> str:
-    """Convert score to confidence level."""
+def _confidence_level(score: float) -> str:
     if score >= 0.85:
         return "high"
     elif score >= 0.60:
@@ -320,16 +301,44 @@ async def health():
     return {"status": "healthy", "service": "agent"}
 
 
+@app.get("/models")
+async def list_models():
+    """Danh sach model co san tu Ollama + Gemini."""
+    result = {"ollama": [], "gemini": []}
+
+    # Ollama models
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{settings.ollama_base_url}/api/tags")
+            if r.status_code == 200:
+                for m in r.json().get("models", []):
+                    result["ollama"].append({
+                        "name": m["name"],
+                        "size": m.get("details", {}).get("parameter_size", ""),
+                        "family": m.get("details", {}).get("family", ""),
+                    })
+    except Exception as e:
+        logger.warning(f"Cannot list Ollama models: {e}")
+
+    # Gemini models (static list)
+    result["gemini"] = [
+        {"name": "gemini-2.0-flash", "description": "Fast, free tier"},
+        {"name": "gemini-1.5-flash", "description": "Fast, cheaper"},
+        {"name": "gemini-1.5-pro", "description": "Best quality"},
+    ]
+
+    return result
+
+
 @app.post("/invoke", response_model=InvokeResponse)
-async def invoke_agent(request: InvokeRequest) -> InvokeResponse:
-    """Invoke agent với message."""
-    logger.info(f"Agent invoke: conv={request.conversation_id}, msg={request.message[:50]}...")
+async def invoke(request: InvokeRequest) -> InvokeResponse:
+    logger.info(f"Invoke: conv={request.conversation_id}, msg={request.message[:50]}...")
     try:
         return await run_agent(request)
     except Exception as e:
         logger.error(f"Agent error: {e}")
         return InvokeResponse(
-            message="Xin lỗi, có lỗi xảy ra. Vui lòng thử lại.",
+            message="Co loi xay ra. Vui long thu lai.",
             conversation_id=request.conversation_id,
             confidence_score=0.0,
             confidence_level="very_low",

@@ -39,15 +39,10 @@ async def start_research(request: DeepResearchRequest) -> DeepResearchResult:
             response = await client.post(
                 f"{settings.research_service_url}/research",
                 json={
-                    "research_id": research_id,
                     "topic": request.topic,
-                    "sub_topics": request.sub_topics,
                     "depth_level": request.depth_level,
                     "max_pages": request.max_pages,
-                    "source_types": request.source_types,
-                    "language": request.language,
-                    "output_format": request.output_format,
-                    "citation_style": request.citation_style,
+                    "sources": request.source_types,
                 },
             )
 

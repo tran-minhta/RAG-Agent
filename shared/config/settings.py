@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # --- Embeddings ---
     embedding_model: str = "all-MiniLM-L6-v2"
 
+    # --- Document Processing ---
+    mineru_enabled: bool = True
+    markitdown_enabled: bool = True
+    magika_enabled: bool = True
+
     # --- ChromaDB ---
     chroma_host: str = "chromadb"
     chroma_port: int = 8000

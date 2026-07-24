@@ -233,6 +233,13 @@ services:
       - /usr/share/ollama/.ollama:/root/.ollama
     environment:
       - OLLAMA_HOST=0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     networks:
       - rag-network
     restart: unless-stopped

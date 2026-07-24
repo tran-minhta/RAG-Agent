@@ -102,6 +102,7 @@ async def call_ollama(
         "model": model,
         "messages": messages,
         "stream": False,
+        "think": False,
         "options": {"temperature": 0.7, "num_predict": 2048},
     }
     async with httpx.AsyncClient(timeout=300) as client:

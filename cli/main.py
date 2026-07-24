@@ -204,6 +204,7 @@ Chào mừng đến với **RAG-ALL** - Trợ lý AI nghiên cứu học thuật
                     json={
                         "topic": topic,
                         "depth_level": int(depth),
+                        "source_types": ["arxiv", "pubmed", "semantic_scholar"],
                     },
                 )
 

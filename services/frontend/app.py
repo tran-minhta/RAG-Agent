@@ -343,21 +343,28 @@ async def _do_research(topic: str):
     try:
         async with httpx.AsyncClient(timeout=600) as client:
             response = await client.post(
-                f"{GATEWAY_URL}/research/start",
+                f"{GATEWAY_URL}/research/",
                 json={
                     "topic": topic,
                     "depth_level": 2,
-                    "sources": ["arxiv", "pubmed", "semantic_scholar", "web"],
+                    "source_types": ["arxiv", "pubmed", "semantic_scholar"],
                 },
             )
 
             if response.status_code == 200:
                 data = response.json()
+                pages = data.get("pages_crawled", 0)
+                sources = {}
+                for p in data.get("sources", []):
+                    src = p.get("source", "unknown")
+                    sources[src] = sources.get(src, 0) + 1
+                source_summary = ", ".join(f"{k}: {v}" for k, v in sources.items())
+
                 await cl.Message(
                     content=(
                         f"**Nghien cuu hoan thanh!**\n\n"
-                        f"- Pages crawled: {data.get('pages_crawled', 0)}\n"
-                        f"- Session: {data.get('session_id', 'N/A')}\n\n"
+                        f"- Tong so trang: {pages}\n"
+                        f"- Nguon: {source_summary}\n\n"
                         f"Ket qua da duoc luu."
                     )
                 ).send()

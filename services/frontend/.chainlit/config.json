@@ -1,0 +1,17 @@
+{
+  "UI": {
+    "name": "RAG-ALL",
+    "description": "AI-Agent hỗ trợ nghiên cứu học thuật",
+    "logo": "",
+    "hide_cot": false,
+    "default_collapse_content": true,
+    "default_expand_messages": false,
+    "show_readme_as_default": false,
+    "theme": "light"
+  },
+  "project": {
+    "user_env": [],
+    "database": null,
+    "authentication": null
+  }
+}

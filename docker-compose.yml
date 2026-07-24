@@ -1,0 +1,286 @@
+# =============================================================================
+# RAG-ALL: Docker Compose Configuration
+# AI-Agent hỗ trợ nghiên cứu, học tập, làm luận án
+# =============================================================================
+# Services:
+#   - gateway       : API Gateway (FastAPI) - Port 8000
+#   - agent         : AI Agent Service (LangGraph) - Port 8001
+#   - rag           : RAG Pipeline (ChromaDB) - Port 8002
+#   - document      : Document Processing (MinerU/MarkItDown) - Port 8003
+#   - research      : Deep Research (Deep Browser + Search) - Port 8007
+#   - editor        : Professional Editor (Accuracy + Formatting) - Port 8008
+#   - voice         : Voice Service (Piper TTS + Whisper STT) - Port 8004
+#   - frontend      : Chainlit WebUI - Port 8005
+#   - ollama        : Local LLM Server - Port 11434
+#   - chromadb      : Vector Store - Port 8006
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # API GATEWAY - Central routing hub
+  # ---------------------------------------------------------------------------
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - AGENT_SERVICE_URL=http://agent:8001
+      - RAG_SERVICE_URL=http://rag:8002
+      - DOCUMENT_SERVICE_URL=http://document:8003
+      - RESEARCH_SERVICE_URL=http://research:8007
+      - EDITOR_SERVICE_URL=http://editor:8008
+      - VOICE_SERVICE_URL=http://voice:8004
+    volumes:
+      - ./shared:/app/shared
+      - ./data:/app/data
+    depends_on:
+      - agent
+      - rag
+      - document
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # AGENT SERVICE - LangGraph AI Agent with multi-LLM routing
+  # ---------------------------------------------------------------------------
+  agent:
+    build:
+      context: .
+      dockerfile: services/agent/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - RAG_SERVICE_URL=http://rag:8002
+      - DOCUMENT_SERVICE_URL=http://document:8003
+      - RESEARCH_SERVICE_URL=http://research:8007
+      - EDITOR_SERVICE_URL=http://editor:8008
+    volumes:
+      - ./shared:/app/shared
+      - ./data:/app/data
+    depends_on:
+      - ollama
+      - rag
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # RAG SERVICE - ChromaDB vector store + embeddings
+  # ---------------------------------------------------------------------------
+  rag:
+    build:
+      context: .
+      dockerfile: services/rag/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+    volumes:
+      - ./shared:/app/shared
+      - ./data/chroma:/app/data/chroma
+    depends_on:
+      - chromadb
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # DOCUMENT SERVICE - MinerU + MarkItDown + Magika
+  # ---------------------------------------------------------------------------
+  document:
+    build:
+      context: .
+      dockerfile: services/document/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - MINERU_ENABLED=true
+      - MARKITDOWN_ENABLED=true
+      - MAGIKA_ENABLED=true
+    volumes:
+      - ./shared:/app/shared
+      - ./data/documents:/app/data/documents
+      - ./data/cache:/app/data/cache
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # RESEARCH SERVICE - Deep web browsing + multi-source search
+  # ---------------------------------------------------------------------------
+  research:
+    build:
+      context: .
+      dockerfile: services/research/Dockerfile
+    ports:
+      - "8007:8007"
+    environment:
+      - CRAWL4AI_URL=http://crawl4ai:3000
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      - SEMANTIC_SCHOLAR_API_KEY=${SS_API_KEY:-}
+    volumes:
+      - ./shared:/app/shared
+      - ./data/research_cache:/app/data/research_cache
+    depends_on:
+      - crawl4ai
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # EDITOR SERVICE - Professional editing + accuracy enforcement
+  # ---------------------------------------------------------------------------
+  editor:
+    build:
+      context: .
+      dockerfile: services/editor/Dockerfile
+    ports:
+      - "8009:8009"
+    environment:
+      - CITATION_VERIFY_ENABLED=true
+      - FACT_CROSSREF_ENABLED=true
+      - HALLUCINATION_DETECTION_ENABLED=true
+    volumes:
+      - ./shared:/app/shared
+      - ./data:/app/data
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # ACCURACY ENGINE - Citation verification + hallucination detection
+  # ---------------------------------------------------------------------------
+  accuracy:
+    build:
+      context: .
+      dockerfile: services/accuracy/Dockerfile
+    ports:
+      - "8008:8008"
+    environment:
+      - CITATION_VERIFY_ENABLED=true
+      - FACT_CROSSREF_ENABLED=true
+      - HALLUCINATION_DETECTION_ENABLED=true
+    volumes:
+      - ./shared:/app/shared
+      - ./data:/app/data
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # VOICE SERVICE - Piper TTS + Whisper STT
+  # ---------------------------------------------------------------------------
+  voice:
+    build:
+      context: .
+      dockerfile: services/voice/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - TTS_ENGINE=piper
+      - STT_ENGINE=whisper
+      - WHISPER_MODEL=base
+      - PIPER_MODEL_DIR=/app/data/models/piper
+    volumes:
+      - ./shared:/app/shared
+      - ./data/models:/app/data/models
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # FRONTEND - Chainlit WebUI
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: services/frontend/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - CHAINLIT_APP_PORT=8005
+      - API_GATEWAY_URL=http://gateway:8000
+    volumes:
+      - ./shared:/app/shared
+      - ./services/frontend/.chainlit:/app/.chainlit
+    depends_on:
+      - gateway
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # OLLAMA - Local LLM Server
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - rag-network
+    restart: unless-stopped
+    # GPU passthrough (uncomment if you have NVIDIA GPU)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ---------------------------------------------------------------------------
+  # CHROMADB - Vector Store
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8006:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # CRAWL4AI - Self-hosted Web Crawler
+  # ---------------------------------------------------------------------------
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - CRAWL4AI_API_TOKEN=${CRAWL4AI_TOKEN:-}
+    volumes:
+      - crawl4ai_data:/app/data
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  ollama_data:
+  chroma_data:
+  crawl4ai_data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  rag-network:
+    driver: bridge

@@ -319,14 +319,18 @@ async def chat_with_agent(content: str):
                         elif src.get("type") == "knowledge_base":
                             reply += f"\n{i}. KB (score: {src.get('score', 0):.2f})"
 
-                await thinking.update(content=reply)
+                await thinking.remove()
+                await cl.Message(content=reply).send()
             else:
-                await thinking.update(content="Co loi xay ra. Vui long thu lai.")
+                await thinking.remove()
+                await cl.Message(content="Co loi xay ra. Vui long thu lai.").send()
 
     except httpx.TimeoutException:
-        await thinking.update(content="Het thoi gian xu ly. Vui long thu cau hoi don gian hon.")
+        await thinking.remove()
+        await cl.Message(content="Het thoi gian xu ly. Vui long thu cau hoi don gian hon.").send()
     except Exception as e:
-        await thinking.update(content=f"Loi: {str(e)}")
+        await thinking.remove()
+        await cl.Message(content=f"Loi: {str(e)}").send()
 
 
 # =============================================================================

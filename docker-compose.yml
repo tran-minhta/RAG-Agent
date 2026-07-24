@@ -132,6 +132,7 @@ services:
       - SEMANTIC_SCHOLAR_API_KEY=${SS_API_KEY:-}
     volumes:
       - ./shared:/app/shared
+      - ./services/research:/app/services/research
       - ./data/research_cache:/app/data/research_cache
     depends_on:
       - crawl4ai

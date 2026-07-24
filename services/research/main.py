@@ -149,13 +149,14 @@ class AcademicSearch:
         """Search ArXiv for papers."""
         try:
             import arxiv
+            client = arxiv.Client()
             search = arxiv.Search(
                 query=query,
                 max_results=max_results,
                 sort_by=arxiv.SortCriterion.Relevance,
             )
             results = []
-            for paper in search.results():
+            for paper in client.results(search):
                 results.append({
                     "title": paper.title,
                     "url": paper.entry_id,
@@ -172,51 +173,51 @@ class AcademicSearch:
     async def search_pubmed(self, query: str, max_results: int = 10) -> list[dict]:
         """Search PubMed for biomedical papers."""
         try:
-            import requests
-            # Search for IDs
-            search_resp = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params={
-                    "db": "pubmed",
-                    "term": query,
-                    "retmax": max_results,
-                    "retmode": "json",
-                },
-                timeout=10,
-            )
-            if not search_resp.ok:
-                return []
+            import httpx
+            headers = {"User-Agent": "RAG-Agent/1.0 (research)"}
+            async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+                # Search for IDs
+                search_resp = await client.get(
+                    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                    params={
+                        "db": "pubmed",
+                        "term": query,
+                        "retmax": max_results,
+                        "retmode": "json",
+                    },
+                )
+                if search_resp.status_code != 200:
+                    return []
 
-            ids = search_resp.json().get("esearchresult", {}).get("idlist", [])
-            if not ids:
-                return []
+                ids = search_resp.json().get("esearchresult", {}).get("idlist", [])
+                if not ids:
+                    return []
 
-            # Fetch details
-            detail_resp = requests.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
-                params={
-                    "db": "pubmed",
-                    "id": ",".join(ids),
-                    "retmode": "json",
-                },
-                timeout=10,
-            )
-            if not detail_resp.ok:
-                return []
+                # Fetch details
+                detail_resp = await client.get(
+                    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                    params={
+                        "db": "pubmed",
+                        "id": ",".join(ids),
+                        "retmode": "json",
+                    },
+                )
+                if detail_resp.status_code != 200:
+                    return []
 
-            results = []
-            for uid in ids:
-                article = detail_resp.json().get("result", {}).get(uid, {})
-                if article:
-                    results.append({
-                        "title": article.get("title", ""),
-                        "url": f"https://pubmed.ncbi.nlm.nih.gov/{uid}/",
-                        "abstract": article.get("title", ""),  # Summary not in esummary
-                        "authors": [a.get("name", "") for a in article.get("authors", [])],
-                        "published": article.get("pubdate", ""),
-                        "source": "pubmed",
-                    })
-            return results
+                results = []
+                for uid in ids:
+                    article = detail_resp.json().get("result", {}).get(uid, {})
+                    if article:
+                        results.append({
+                            "title": article.get("title", ""),
+                            "url": f"https://pubmed.ncbi.nlm.nih.gov/{uid}/",
+                            "abstract": article.get("title", ""),
+                            "authors": [a.get("name", "") for a in article.get("authors", [])],
+                            "published": article.get("pubdate", ""),
+                            "source": "pubmed",
+                        })
+                return results
         except Exception as e:
             logger.warning(f"PubMed search failed: {e}")
             return []
@@ -224,31 +225,32 @@ class AcademicSearch:
     async def search_semantic_scholar(self, query: str, max_results: int = 10) -> list[dict]:
         """Search Semantic Scholar."""
         try:
-            import requests
-            resp = requests.get(
-                "https://api.semanticscholar.org/graph/v1/paper/search",
-                params={
-                    "query": query,
-                    "limit": max_results,
-                    "fields": "title,abstract,url,year,authors,citationCount",
-                },
-                timeout=10,
-            )
-            if not resp.ok:
-                return []
+            import httpx
+            headers = {"User-Agent": "RAG-Agent/1.0 (research)"}
+            async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+                resp = await client.get(
+                    "https://api.semanticscholar.org/graph/v1/paper/search",
+                    params={
+                        "query": query,
+                        "limit": max_results,
+                        "fields": "title,abstract,url,year,authors,citationCount",
+                    },
+                )
+                if resp.status_code != 200:
+                    return []
 
-            results = []
-            for paper in resp.json().get("data", []):
-                results.append({
-                    "title": paper.get("title", ""),
-                    "url": paper.get("url", ""),
-                    "abstract": paper.get("abstract", ""),
-                    "authors": [a.get("name", "") for a in paper.get("authors", [])],
-                    "published": str(paper.get("year", "")),
-                    "citation_count": paper.get("citationCount", 0),
-                    "source": "semantic_scholar",
-                })
-            return results
+                results = []
+                for paper in resp.json().get("data", []):
+                    results.append({
+                        "title": paper.get("title", ""),
+                        "url": paper.get("url", ""),
+                        "abstract": paper.get("abstract", ""),
+                        "authors": [a.get("name", "") for a in paper.get("authors", [])],
+                        "published": str(paper.get("year", "")),
+                        "citation_count": paper.get("citationCount", 0),
+                        "source": "semantic_scholar",
+                    })
+                return results
         except Exception as e:
             logger.warning(f"Semantic Scholar search failed: {e}")
             return []
@@ -301,9 +303,9 @@ class ResearchOrchestrator:
                 all_pages.append(CrawledPage(
                     url=r["url"],
                     title=r["title"],
-                    content=r.get("abstract", ""),
+                    content_markdown=r.get("abstract", ""),
                     depth=0,
-                    source="arxiv",
+                    source_type="arxiv",
                 ))
 
         if "pubmed" in sources:
@@ -312,9 +314,9 @@ class ResearchOrchestrator:
                 all_pages.append(CrawledPage(
                     url=r["url"],
                     title=r["title"],
-                    content=r.get("abstract", ""),
+                    content_markdown=r.get("abstract", ""),
                     depth=0,
-                    source="pubmed",
+                    source_type="pubmed",
                 ))
 
         if "semantic_scholar" in sources:
@@ -323,9 +325,9 @@ class ResearchOrchestrator:
                 all_pages.append(CrawledPage(
                     url=r["url"],
                     title=r["title"],
-                    content=r.get("abstract", ""),
+                    content_markdown=r.get("abstract", ""),
                     depth=0,
-                    source="semantic_scholar",
+                    source_type="semantic_scholar",
                 ))
 
         # Web crawling with Crawl4AI
@@ -341,9 +343,9 @@ class ResearchOrchestrator:
                     all_pages.append(CrawledPage(
                         url=c.get("url", ""),
                         title=c.get("title", ""),
-                        content=c.get("content", ""),
+                        content_markdown=c.get("content", ""),
                         depth=c.get("depth", 0),
-                        source="web",
+                        source_type="web",
                     ))
 
         logger.info(f"Research complete: {len(all_pages)} pages collected")
@@ -358,9 +360,9 @@ class ResearchOrchestrator:
                 CrawledPageResponse(
                     url=p.url,
                     title=p.title,
-                    content=p.content[:500],  # Truncate for response
+                    content=p.content_markdown[:500],  # Truncate for response
                     depth=p.depth,
-                    source=p.source,
+                    source=p.source_type,
                 )
                 for p in all_pages[:max_pages]
             ],

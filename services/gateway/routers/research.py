@@ -15,8 +15,8 @@ from shared.utils.logger import gateway_logger as logger
 router = APIRouter()
 
 
-@router.post("/", response_model=DeepResearchResult)
-async def start_research(request: DeepResearchRequest) -> DeepResearchResult:
+@router.post("/")
+async def start_research(request: DeepResearchRequest):
     """
     Bắt đầu deep research.
     Pipeline: Query Planning → Search → Crawl → Analyze → Synthesize
@@ -51,7 +51,17 @@ async def start_research(request: DeepResearchRequest) -> DeepResearchResult:
                 # Research service returns session_id, map to research_id
                 if "session_id" in data and "research_id" not in data:
                     data["research_id"] = data.pop("session_id")
-                return DeepResearchResult(**data)
+                # Map pages to sources for DeepResearchResult
+                pages = data.pop("pages", [])
+                if pages and not data.get("sources"):
+                    data["sources"] = [
+                        {"title": p.get("title", ""), "url": p.get("url", ""), "source": p.get("source", ""), "content": p.get("content", "")}
+                        for p in pages
+                    ]
+                    data["total_sources"] = len(pages)
+                # Pass pages through in response
+                data["pages"] = pages
+                return data
             else:
                 raise HTTPException(
                     status_code=response.status_code,

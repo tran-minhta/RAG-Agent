@@ -353,21 +353,35 @@ async def _do_research(topic: str):
 
             if response.status_code == 200:
                 data = response.json()
-                pages = data.get("pages_crawled", 0)
-                sources = {}
-                for p in data.get("sources", []):
-                    src = p.get("source", "unknown")
-                    sources[src] = sources.get(src, 0) + 1
-                source_summary = ", ".join(f"{k}: {v}" for k, v in sources.items())
+                pages = data.get("pages", [])
+                sources = data.get("sources", [])
 
-                await cl.Message(
-                    content=(
-                        f"**Nghien cuu hoan thanh!**\n\n"
-                        f"- Tong so trang: {pages}\n"
-                        f"- Nguon: {source_summary}\n\n"
-                        f"Ket qua da duoc luu."
-                    )
-                ).send()
+                # Count by source
+                source_counts = {}
+                for p in pages:
+                    src = p.get("source", "unknown")
+                    source_counts[src] = source_counts.get(src, 0) + 1
+
+                # Build result message
+                result = f"**Nghien cuu hoan thanh!**\n\n"
+                result += f"- Tong so trang: {len(pages)}\n"
+                for src, count in source_counts.items():
+                    result += f"  - {src}: {count} bai\n"
+
+                # Show top results
+                result += f"\n**Ket qua noi bat:**\n\n"
+                for i, p in enumerate(pages[:10], 1):
+                    title = p.get("title", "N/A")
+                    url = p.get("url", "")
+                    content = p.get("content", "")[:150]
+                    result += f"{i}. **{title}**\n"
+                    if url:
+                        result += f"   Link: {url}\n"
+                    if content:
+                        result += f"   > {content}...\n"
+                    result += "\n"
+
+                await cl.Message(content=result).send()
             else:
                 await cl.Message(content=f"Nghien cuu that bai: {response.text}").send()
 
